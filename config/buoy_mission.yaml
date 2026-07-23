@@ -1,0 +1,112 @@
+buoy_coordinate_mapper:
+  ros__parameters:
+    odom_topic: /odometry/filtered
+    detection_3d_topic: /vision/buoy_detection_3d
+    tracks_topic: /mission/buoy_tracks
+    observation_topic: /mission/buoy_observation
+    vision_search_topic: /homing/vision_search_active
+    target_confirmed_topic: /vision/target_confirmed
+    # region_local_gradient_homing.launch.py와 같은 odom 수영장 좌표 규칙.
+    arena_length_m: 10.0
+    arena_width_m: 15.0
+    arena_depth_m: 11.0
+    arena_offset_x_m: 0.0
+    arena_offset_y_m: 0.0
+    arena_surface_z_m: 0.0
+    arena_start_corner: bottom_left
+    buoy_class_id: 0
+    association_distance_m: 1.0
+    observation_outlier_distance_m: 0.6
+    track_buffer_size: 40
+    min_confirm_observations: 6
+    max_position_rms_m: 0.30
+    depth_variance_floor_m2: 0.0025
+    odom_buffer_sec: 3.0
+    max_detection_odom_gap_sec: 0.10
+    handoff_confirm_hits: 4
+    handoff_detection_timeout_sec: 0.7
+    handoff_detection_consistency_m: 0.75
+
+buoy_mission_manager:
+  ros__parameters:
+    # 고정 odom 수영장 박스. 시작 플래그를 받은 현재 위치와 무관하다.
+    # bottom_left: offset에서 안쪽이 -Y, bottom_right: 안쪽이 +Y.
+    arena_length_m: 10.0
+    arena_width_m: 15.0
+    arena_depth_m: 11.0
+    arena_offset_x_m: 0.0
+    arena_offset_y_m: 0.0
+    arena_surface_z_m: 0.0
+    arena_start_corner: bottom_left
+    arena_safety_margin_m: 0.5
+    surface_safety_margin_m: 0.5
+    bottom_safety_margin_m: 1.0
+
+    waypoint_tolerance_m: 0.45
+
+    buoy_class_id: 0
+    stick_class_id: 1
+
+    standoff_distance_m: 1.5
+    mission_start_topic: /mission/start
+    target_recent_sec: 0.8
+    target_reacquire_timeout_sec: 5.0
+
+    odom_timeout_sec: 0.20
+    handoff_hold_sec: 0.7
+    max_handoff_speed_mps: 0.20
+
+    acoustic_handoff_enabled: true
+    vision_search_topic: /homing/vision_search_active
+    target_confirmed_topic: /vision/target_confirmed
+    control_granted_topic: /homing/vision_control_granted
+    dry_run: false
+    request_vision_mode: true
+    vision_mode_name: STABILIZE
+    waypoint_topic: /waypoint
+
+buoy_visual_strike:
+  ros__parameters:
+    dry_run: false
+    acoustic_handoff_enabled: true
+    control_granted_topic: /homing/vision_control_granted
+    buoy_class_id: 0
+    stick_class_id: 1
+    depth_pose_topic: /depth/pose
+    depth_pose_scale: -1.0
+    max_depth_m: 11.0
+
+    fork_target_x: 0.30
+    fork_target_y: 0.70
+    stick_deadband_x: 0.06
+    stick_deadband_y: 0.08
+    align_stable_sec: 0.7
+
+    insert_pwm: 1560
+    insert_duration_sec: 0.8
+    strike_pwm: 1620
+    strike_duration_sec: 0.3
+    retract_pwm: 1420
+    retract_duration_sec: 0.5
+    release_area_ratio: 0.65
+    max_target_retries: 2
+
+    throttle_channel: 3
+    yaw_channel: 4
+    forward_channel: 5
+    neutral_pwm: 1500
+    min_pwm: 1300
+    max_pwm: 1700
+
+buoy_mission_visualization:
+  ros__parameters:
+    arena_length_m: 10.0
+    arena_width_m: 15.0
+    arena_depth_m: 11.0
+    arena_offset_x_m: 0.0
+    arena_offset_y_m: 0.0
+    arena_surface_z_m: 0.0
+    arena_start_corner: bottom_left
+    max_observation_points: 5000
+    max_path_points: 10000
+    path_min_step_m: 0.05

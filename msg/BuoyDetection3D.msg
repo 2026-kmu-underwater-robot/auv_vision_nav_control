@@ -1,0 +1,17 @@
+std_msgs/Header header
+bool detected
+bool range_valid
+int32 class_id
+float32 confidence
+float32 center_x
+float32 center_y
+float32 width
+float32 height
+uint32 image_width
+uint32 image_height
+uint32 detections_in_frame
+uint32 detection_index
+geometry_msgs/Point point_camera
+float32 range_m
+float32 depth_stddev_m
+uint32 valid_depth_pixels
