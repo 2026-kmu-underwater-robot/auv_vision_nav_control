@@ -130,9 +130,10 @@ def generate_launch_description():
             DeclareLaunchArgument("arena_length_m", default_value="10.0"),
             DeclareLaunchArgument("arena_width_m", default_value="15.0"),
             DeclareLaunchArgument("arena_depth_m", default_value="11.0"),
-            DeclareLaunchArgument("arena_offset_x_m", default_value="0.0"),
-            DeclareLaunchArgument("arena_offset_y_m", default_value="0.0"),
-            DeclareLaunchArgument("arena_surface_z_m", default_value="0.0"),
+            DeclareLaunchArgument(
+                "arena_start_frame_topic",
+                default_value="/guided/start_frame",
+            ),
             DeclareLaunchArgument(
                 "arena_start_corner",
                 default_value="bottom_left",
@@ -289,14 +290,8 @@ def generate_launch_description():
                         "arena_depth_m": ParameterValue(
                             LaunchConfiguration("arena_depth_m"), value_type=float
                         ),
-                        "arena_offset_x_m": ParameterValue(
-                            LaunchConfiguration("arena_offset_x_m"), value_type=float
-                        ),
-                        "arena_offset_y_m": ParameterValue(
-                            LaunchConfiguration("arena_offset_y_m"), value_type=float
-                        ),
-                        "arena_surface_z_m": ParameterValue(
-                            LaunchConfiguration("arena_surface_z_m"), value_type=float
+                        "arena_start_frame_topic": LaunchConfiguration(
+                            "arena_start_frame_topic"
                         ),
                         "arena_start_corner": LaunchConfiguration(
                             "arena_start_corner"

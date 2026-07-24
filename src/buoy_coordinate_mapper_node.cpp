@@ -13,6 +13,7 @@
 
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/bool.hpp>
@@ -63,6 +64,18 @@ tf2::Quaternion normalized_quaternion(const geometry_msgs::msg::Quaternion & inp
   output.normalize();
   return output;
 }
+
+double yaw_from_quaternion(const geometry_msgs::msg::Quaternion & orientation)
+{
+  const auto quaternion = normalized_quaternion(orientation);
+  const double x = quaternion.x();
+  const double y = quaternion.y();
+  const double z = quaternion.z();
+  const double w = quaternion.w();
+  return std::atan2(
+    2.0 * (w * z + x * y),
+    1.0 - 2.0 * (y * y + z * z));
+}
 }  // namespace
 
 class BuoyCoordinateMapper : public rclcpp::Node
@@ -72,6 +85,8 @@ public:
   : Node("buoy_coordinate_mapper"), tf_buffer_(get_clock()), tf_listener_(tf_buffer_)
   {
     odom_topic_ = declare_parameter<std::string>("odom_topic", "/odometry/filtered");
+    arena_start_frame_topic_ = declare_parameter<std::string>(
+      "arena_start_frame_topic", "/guided/start_frame");
     detection_topic_ = declare_parameter<std::string>(
       "detection_3d_topic", "/vision/buoy_detection_3d");
     tracks_topic_ = declare_parameter<std::string>(
@@ -86,9 +101,6 @@ public:
     arena_length_m_ = declare_parameter<double>("arena_length_m", 10.0);
     arena_width_m_ = declare_parameter<double>("arena_width_m", 15.0);
     arena_depth_m_ = declare_parameter<double>("arena_depth_m", 11.0);
-    arena_offset_x_m_ = declare_parameter<double>("arena_offset_x_m", 0.0);
-    arena_offset_y_m_ = declare_parameter<double>("arena_offset_y_m", 0.0);
-    arena_surface_z_m_ = declare_parameter<double>("arena_surface_z_m", 0.0);
     arena_start_corner_ = declare_parameter<std::string>(
       "arena_start_corner", "bottom_left");
 
@@ -115,6 +127,9 @@ public:
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       odom_topic_, rclcpp::SensorDataQoS(),
       std::bind(&BuoyCoordinateMapper::on_odom, this, std::placeholders::_1));
+    arena_start_frame_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+      arena_start_frame_topic_, rclcpp::QoS(1).reliable().transient_local(),
+      std::bind(&BuoyCoordinateMapper::on_arena_start_frame, this, std::placeholders::_1));
     detection_sub_ = create_subscription<Detection3D>(
       detection_topic_, 20,
       std::bind(&BuoyCoordinateMapper::on_detection, this, std::placeholders::_1));
@@ -133,11 +148,10 @@ public:
     RCLCPP_INFO(
       get_logger(),
       "Buoy coordinate mapper ready: detection=%s odom=%s tracks=%s, "
-      "arena x=[%.2f, %.2f] y=[%.2f, %.2f] z=[%.2f, %.2f]",
+      "arena-local x=[0.00, %.2f] width=%.2f z=[%.2f, 0.00]; waiting for %s",
       detection_topic_.c_str(), odom_topic_.c_str(), tracks_topic_.c_str(),
-      arena_offset_x_m_, arena_offset_x_m_ + arena_length_m_,
-      arena_y_min(), arena_y_max(),
-      arena_surface_z_m_ - arena_depth_m_, arena_surface_z_m_);
+      arena_length_m_, arena_width_m_, -arena_depth_m_,
+      arena_start_frame_topic_.c_str());
   }
 
 private:
@@ -171,8 +185,7 @@ private:
   {
     if (
       arena_length_m_ <= 0.0 || arena_width_m_ <= 0.0 || arena_depth_m_ <= 0.0 ||
-      !std::isfinite(arena_offset_x_m_) || !std::isfinite(arena_offset_y_m_) ||
-      !std::isfinite(arena_surface_z_m_) ||
+      arena_start_frame_topic_.empty() ||
       association_distance_m_ <= 0.0 || observation_outlier_distance_m_ <= 0.0 ||
       track_buffer_size_ < 1 || min_confirm_observations_ < 1 ||
       min_confirm_observations_ > track_buffer_size_ ||
@@ -198,6 +211,16 @@ private:
     if (message->header.frame_id.empty() || message->child_frame_id.empty()) {
       return;
     }
+    if (
+      arena_frame_ready_ &&
+      message->header.frame_id != arena_parent_frame_)
+    {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Ignored odometry in '%s'; arena start frame uses '%s'",
+        message->header.frame_id.c_str(), arena_parent_frame_.c_str());
+      return;
+    }
     const rclcpp::Time stamp(message->header.stamp, RCL_ROS_TIME);
     if (stamp.nanoseconds() <= 0) {
       return;
@@ -214,6 +237,43 @@ private:
       odom_buffer_sec_)
     {
       odom_buffer_.pop_front();
+    }
+  }
+
+  void on_arena_start_frame(
+    const geometry_msgs::msg::PoseStamped::SharedPtr message)
+  {
+    if (message->header.frame_id.empty()) {
+      RCLCPP_WARN(get_logger(), "Ignored /guided/start_frame with an empty parent frame");
+      return;
+    }
+    if (!odom_frame_.empty() && message->header.frame_id != odom_frame_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Ignored /guided/start_frame in '%s'; odometry uses '%s'",
+        message->header.frame_id.c_str(), odom_frame_.c_str());
+      return;
+    }
+    const auto & origin = message->pose.position;
+    try {
+      if (
+        !std::isfinite(origin.x) || !std::isfinite(origin.y) ||
+        !std::isfinite(origin.z))
+      {
+        throw std::runtime_error("non-finite origin");
+      }
+      arena_origin_ = origin;
+      arena_yaw_rad_ = yaw_from_quaternion(message->pose.orientation);
+      arena_parent_frame_ = message->header.frame_id;
+      arena_frame_ready_ = true;
+      RCLCPP_INFO(
+        get_logger(),
+        "Arena frame received: origin=(%.3f, %.3f, %.3f), yaw=%.2f deg",
+        arena_origin_.x, arena_origin_.y, arena_origin_.z,
+        arena_yaw_rad_ * 180.0 / 3.14159265358979323846);
+    } catch (const std::exception & error) {
+      RCLCPP_WARN(
+        get_logger(), "Ignored invalid /guided/start_frame: %s", error.what());
     }
   }
 
@@ -238,6 +298,13 @@ private:
     }
     const auto odom_point = detection_to_odom(*detection);
     if (!odom_point) {
+      return;
+    }
+    if (!arena_frame_ready_) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Waiting for %s before storing odom buoy tracks",
+        arena_start_frame_topic_.c_str());
       return;
     }
     if (!inside_arena(*odom_point)) {
@@ -539,32 +606,40 @@ private:
     target_confirmed_pub_->publish(output);
   }
 
-  double arena_y_min() const
+  Point odom_to_arena(const Point & odom) const
   {
-    return arena_start_corner_ == "bottom_left" ?
-      arena_offset_y_m_ - arena_width_m_ : arena_offset_y_m_;
-  }
-
-  double arena_y_max() const
-  {
-    return arena_start_corner_ == "bottom_left" ?
-      arena_offset_y_m_ : arena_offset_y_m_ + arena_width_m_;
+    const double cosine = std::cos(arena_yaw_rad_);
+    const double sine = std::sin(arena_yaw_rad_);
+    const double dx = odom.x - arena_origin_.x;
+    const double dy = odom.y - arena_origin_.y;
+    Point output;
+    output.x = cosine * dx + sine * dy;
+    output.y = -sine * dx + cosine * dy;
+    output.z = odom.z - arena_origin_.z;
+    return output;
   }
 
   bool inside_arena(const Point & point) const
   {
+    if (!arena_frame_ready_) {
+      return false;
+    }
+    const Point arena = odom_to_arena(point);
+    const double y_min =
+      arena_start_corner_ == "bottom_left" ? -arena_width_m_ : 0.0;
+    const double y_max =
+      arena_start_corner_ == "bottom_left" ? 0.0 : arena_width_m_;
     return
-      point.x >= arena_offset_x_m_ &&
-      point.x <= arena_offset_x_m_ + arena_length_m_ &&
-      point.y >= arena_y_min() && point.y <= arena_y_max() &&
-      point.z >= arena_surface_z_m_ - arena_depth_m_ &&
-      point.z <= arena_surface_z_m_;
+      arena.x >= 0.0 && arena.x <= arena_length_m_ &&
+      arena.y >= y_min && arena.y <= y_max &&
+      arena.z >= -arena_depth_m_ && arena.z <= 0.0;
   }
 
-  std::string odom_topic_, detection_topic_, tracks_topic_, observation_topic_;
+  std::string odom_topic_, arena_start_frame_topic_;
+  std::string detection_topic_, tracks_topic_, observation_topic_;
   std::string vision_search_topic_, target_confirmed_topic_;
   std::string arena_start_corner_;
-  std::string odom_frame_, body_frame_;
+  std::string odom_frame_, body_frame_, arena_parent_frame_;
   int buoy_class_id_{0}, track_buffer_size_{40}, min_confirm_observations_{6};
   int handoff_confirm_hits_{4}, handoff_detection_hits_{0};
   double association_distance_m_{1.0}, observation_outlier_distance_m_{0.6};
@@ -573,7 +648,9 @@ private:
   double tf_lookup_timeout_sec_{0.08}, handoff_detection_timeout_sec_{0.7};
   double handoff_detection_consistency_m_{0.75};
   double arena_length_m_{10.0}, arena_width_m_{15.0}, arena_depth_m_{11.0};
-  double arena_offset_x_m_{0.0}, arena_offset_y_m_{0.0}, arena_surface_z_m_{0.0};
+  Point arena_origin_;
+  double arena_yaw_rad_{0.0};
+  bool arena_frame_ready_{false};
   bool vision_search_active_{false}, target_confirmation_sent_{false};
   uint32_t next_track_id_{1};
   std::deque<nav_msgs::msg::Odometry> odom_buffer_;
@@ -584,6 +661,7 @@ private:
   tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformListener tf_listener_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr arena_start_frame_sub_;
   rclcpp::Subscription<Detection3D>::SharedPtr detection_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr vision_search_sub_;
   rclcpp::Publisher<TrackArray>::SharedPtr tracks_pub_;

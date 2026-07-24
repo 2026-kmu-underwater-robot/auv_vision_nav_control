@@ -38,12 +38,9 @@ public:
     search_length_ = declare_parameter<double>("arena_length_m", 10.0);
     search_width_ = declare_parameter<double>("arena_width_m", 15.0);
     search_depth_ = declare_parameter<double>("arena_depth_m", 11.0);
-    arena_offset_x_ = declare_parameter<double>("arena_offset_x_m", 0.0);
-    arena_offset_y_ = declare_parameter<double>("arena_offset_y_m", 0.0);
-    arena_surface_z_ = declare_parameter<double>("arena_surface_z_m", 0.0);
     arena_start_corner_ = declare_parameter<std::string>(
       "arena_start_corner", "bottom_left");
-    arena_frame_ = declare_parameter<std::string>("arena_frame", "odom");
+    arena_frame_ = declare_parameter<std::string>("arena_frame", "arena");
     max_observation_points_ = declare_parameter<int>("max_observation_points", 5000);
     max_path_points_ = declare_parameter<int>("max_path_points", 10000);
     path_min_step_m_ = declare_parameter<double>("path_min_step_m", 0.05);
@@ -65,8 +62,7 @@ public:
 
     if (
       search_length_ <= 0.0 || search_width_ <= 0.0 || search_depth_ <= 0.0 ||
-      !std::isfinite(arena_offset_x_) || !std::isfinite(arena_offset_y_) ||
-      !std::isfinite(arena_surface_z_) || arena_frame_.empty() ||
+      arena_frame_.empty() ||
       max_observation_points_ < 1 || max_path_points_ < 2 || path_min_step_m_ < 0.0)
     {
       throw std::invalid_argument("visualization parameters are invalid");
@@ -106,11 +102,9 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "Mission visualization ready: arena x=[%.2f, %.2f] y=[%.2f, %.2f] "
-      "z=[%.2f, %.2f] frame=%s",
-      arena_offset_x_, arena_offset_x_ + search_length_,
-      arena_y_min(), arena_y_max(),
-      arena_surface_z_ - search_depth_, arena_surface_z_,
+      "Mission visualization ready: arena-local x=[0.00, %.2f] "
+      "width=%.2f z=[%.2f, 0.00], frame=%s",
+      search_length_, search_width_, -search_depth_,
       arena_frame_.c_str());
   }
 
@@ -185,16 +179,17 @@ private:
 
   void add_volume_markers(MarkerArray & output, const rclcpp::Time & stamp) const
   {
-    const double x_min = arena_offset_x_;
-    const double x_max = arena_offset_x_ + search_length_;
-    const double y_min = arena_y_min();
-    const double y_max = arena_y_max();
-    const double z_min = arena_surface_z_ - search_depth_;
-    const double z_max = arena_surface_z_;
+    const double y_min =
+      arena_start_corner_ == "bottom_left" ? -search_width_ : 0.0;
+    const double y_max =
+      arena_start_corner_ == "bottom_left" ? 0.0 : search_width_;
+    const double z_min = -search_depth_;
+    const double z_max = 0.0;
     auto volume = marker_base(arena_frame_, "search_volume", 0, Marker::CUBE, stamp);
-    volume.pose.position.x = 0.5 * (x_min + x_max);
-    volume.pose.position.y = 0.5 * (y_min + y_max);
-    volume.pose.position.z = 0.5 * (z_min + z_max);
+    volume.pose.position =
+      make_point(0.5 * search_length_, 0.5 * (y_min + y_max),
+      0.5 * (z_min + z_max));
+    volume.pose.orientation.w = 1.0;
     volume.scale.x = search_length_;
     volume.scale.y = search_width_;
     volume.scale.z = search_depth_;
@@ -206,14 +201,14 @@ private:
     edges.scale.x = 0.04;
     set_color(edges, 0.15F, 0.70F, 1.0F, 0.85F);
     const std::vector<geometry_msgs::msg::Point> corners = {
-      make_point(x_min, y_min, z_max),
-      make_point(x_max, y_min, z_max),
-      make_point(x_max, y_max, z_max),
-      make_point(x_min, y_max, z_max),
-      make_point(x_min, y_min, z_min),
-      make_point(x_max, y_min, z_min),
-      make_point(x_max, y_max, z_min),
-      make_point(x_min, y_max, z_min)};
+      make_point(0.0, y_min, z_max),
+      make_point(search_length_, y_min, z_max),
+      make_point(search_length_, y_max, z_max),
+      make_point(0.0, y_max, z_max),
+      make_point(0.0, y_min, z_min),
+      make_point(search_length_, y_min, z_min),
+      make_point(search_length_, y_max, z_min),
+      make_point(0.0, y_max, z_min)};
     constexpr int pairs[][2] = {
       {0, 1}, {1, 2}, {2, 3}, {3, 0},
       {4, 5}, {5, 6}, {6, 7}, {7, 4},
@@ -232,18 +227,6 @@ private:
     point.y = y;
     point.z = z;
     return point;
-  }
-
-  double arena_y_min() const
-  {
-    return arena_start_corner_ == "bottom_left" ?
-      arena_offset_y_ - search_width_ : arena_offset_y_;
-  }
-
-  double arena_y_max() const
-  {
-    return arena_start_corner_ == "bottom_left" ?
-      arena_offset_y_ : arena_offset_y_ + search_width_;
   }
 
   void add_observation_marker(MarkerArray & output, const rclcpp::Time & stamp) const
@@ -390,15 +373,12 @@ private:
   double search_length_{10.0};
   double search_width_{15.0};
   double search_depth_{11.0};
-  double arena_offset_x_{0.0};
-  double arena_offset_y_{0.0};
-  double arena_surface_z_{0.0};
   int max_observation_points_{5000};
   int max_path_points_{10000};
   double path_min_step_m_{0.05};
   std::string mission_state_{"IDLE"};
   std::string arena_start_corner_{"bottom_left"};
-  std::string arena_frame_{"odom"};
+  std::string arena_frame_{"arena"};
   std::string observation_frame_;
   std::deque<geometry_msgs::msg::Point> observations_;
   std::optional<nav_msgs::msg::Odometry> latest_odom_;

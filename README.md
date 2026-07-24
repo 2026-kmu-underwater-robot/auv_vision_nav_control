@@ -7,49 +7,58 @@
 이 패키지에는 자동 잠수와 지그재그 탐색 제어가 없습니다. 비전 좌표 계산은
 항상 백엔드에서 동작하고, 제어 상태는 시작 플래그를 받은 뒤에만 시작합니다.
 
-수영장 영역은 음향 패키지의
-`region_local_gradient_homing.launch.py`와 같은 규칙으로 고정합니다.
-`/mission/start`를 받은 현재 로봇 위치를 새 원점으로 만들지 않습니다.
-지도 좌표와 이동 좌표는 모두 설정된 `odom` 수영장 영역을 사용합니다.
+수영장 표시 좌표계는 `/guided/start_frame`을 기준으로 만듭니다. 이 pose의
+위치가 `arena` 원점이고, pose의 yaw 방향이 `arena +X`이므로 기준 로봇의
+yaw는 `arena`에서 0도로 보입니다.
 
-## 수영장 영역과 오프셋
+부표 관측, 평균 트랙, 로봇 위치, 접근 목표와 `/waypoint` 명령은 변환해서
+저장하지 않고 처음부터 끝까지 `odom` 좌표로 유지합니다. `arena` 좌표는
+수영장 크기 입력, 영역 안/밖 검사와 RViz 표시에만 사용합니다.
+
+## 수영장 영역과 기준 프레임
 
 공통 파라미터는 다음과 같습니다.
 
-- `arena_length_m`: 시작 모서리에서 `odom +X` 방향 길이
+- `arena_length_m`: 수영장 로컬 `+X` 방향 길이
 - `arena_width_m`: 수영장 안쪽 Y 방향 너비
 - `arena_depth_m`: 수면부터 바닥까지 깊이
-- `arena_offset_x_m`, `arena_offset_y_m`: `odom`상의 시작 모서리 좌표
-- `arena_surface_z_m`: `odom`상의 수면 높이
+- `arena_start_frame_topic`: 기준 pose 토픽, 기본 `/guided/start_frame`
+- `arena_frame`: 표시용 TF 자식 프레임, 기본 `arena`
 - `arena_start_corner`: `bottom_left` 또는 `bottom_right`
 - `arena_safety_margin_m`: 이동 목표가 벽에서 떨어져야 하는 거리
 
-Y 방향 규칙도 음향 패키지와 같습니다.
+수영장 좌표 범위는 항상 다음과 같습니다.
 
 ```text
-bottom_left : x=[offset_x, offset_x+length]
-              y=[offset_y-width, offset_y]
-
-bottom_right: x=[offset_x, offset_x+length]
-              y=[offset_y, offset_y+width]
-
-공통 깊이    : z=[surface_z-depth, surface_z]
+arena x=[0, length]
+arena z=[-depth, 0]
+bottom_left : arena y=[-width, 0]
+bottom_right: arena y=[0, width]
 ```
 
-예를 들어 시작 모서리가 `odom (-0.30, 0.30)`, 길이 5.49 m, 너비
-2.74 m이고 안쪽이 `-Y`라면 다음 값을 사용합니다.
+`guided_navigation.cpp`와 같은 start-frame 회전식을 사용합니다.
+
+```text
+odom_x = origin_x + cos(start_yaw) * arena_x - sin(start_yaw) * arena_y
+odom_y = origin_y + sin(start_yaw) * arena_x + cos(start_yaw) * arena_y
+odom_z = origin_z + arena_z
+```
+
+영역 검사 때만 `odom` 점을 위 식의 역변환으로 `arena`에 잠시 옮깁니다.
+저장된 부표나 웨이포인트 값 자체는 바꾸지 않습니다.
 
 ```text
 arena_start_corner:=bottom_left
 arena_length_m:=5.49
 arena_width_m:=2.74
-arena_offset_x_m:=-0.30
-arena_offset_y_m:=0.30
+arena_depth_m:=2.0
+arena_start_frame_topic:=/guided/start_frame
 ```
 
-YOLO 좌표 처리 런치와 제어 런치에 반드시 같은 값을 넣어야 합니다.
-영역 밖에서 계산된 부표 점은 좌표 지도에 저장하지 않으며, 부표 앞 접근
-좌표도 안전 여유를 포함한 영역 안으로 제한합니다.
+`buoy_mission_manager_node`가 `/guided/start_frame`을 받아 `odom -> arena`
+TF를 발행합니다. RViz의 Fixed Frame을 `arena`로 설정하면 화면에서만 기준
+yaw가 0도로 정렬됩니다. 영역 밖에서 계산된 odom 부표 점은 좌표 지도에
+저장하지 않으며 접근 좌표도 안전 여유를 포함한 영역 안으로 제한합니다.
 
 ## 음향 제어에서 비전 제어로 인계
 
@@ -166,8 +175,7 @@ ros2 launch kmu26_auv_planning_vision_control laptop_yolo_detection.launch.py \
   arena_start_corner:=bottom_left \
   arena_length_m:=5.49 \
   arena_width_m:=2.74 \
-  arena_offset_x_m:=-0.30 \
-  arena_offset_y_m:=0.30 \
+  arena_start_frame_topic:=/guided/start_frame \
   show_preview:=false \
   show_output_window:=false
 ```
@@ -219,9 +227,7 @@ ros2 run tf2_ros tf2_echo base_link camera_color_optical_frame
 ros2 launch kmu26_auv_planning_vision_control buoy_mission.launch.py \
   arena_start_corner:=bottom_left \
   arena_length_m:=5.49 \
-  arena_width_m:=2.74 \
-  arena_offset_x_m:=-0.30 \
-  arena_offset_y_m:=0.30
+  arena_width_m:=2.74
 ```
 
 ## 기본 운용 설정
@@ -310,7 +316,7 @@ ROS의 `odom` 좌표 방향은 다음과 같습니다.
 - `/mission/target_failed`
 - `/mission/rc_command`: dry-run에서도 확인할 수 있는 RC 명령
 - `/waypoint`: `dry_run=false`이고 제어권이 있을 때 발행하는 절대 `odom` 목표
-- `odom -> mission` TF: 임무 시작점이 설정된 동안 발행
+- `odom -> arena` TF: `/guided/start_frame`을 받은 뒤 계속 발행
 
 시각화 노드에서 추가로 발행하는 토픽:
 
@@ -550,7 +556,8 @@ RViz에는 다음 항목이 표시됩니다.
 - 자홍색: 놓친 부표
 - 회색: 오래되었거나 제외된 부표
 
-RViz의 기준 좌표는 `odom`입니다.
+RViz의 기준 좌표는 `arena`입니다. 부표, 로봇 경로와 웨이포인트 메시지는
+여전히 `odom`이지만 RViz가 `odom -> arena` TF로 화면에서만 변환합니다.
 
 임무 탐색 범위를 변경했다면 시각화에도 같은 값을 전달해야 합니다.
 
@@ -560,10 +567,7 @@ ros2 launch kmu26_auv_planning_vision_control \
   arena_start_corner:=bottom_left \
   arena_length_m:=5.49 \
   arena_width_m:=2.74 \
-  arena_depth_m:=11.0 \
-  arena_offset_x_m:=-0.30 \
-  arena_offset_y_m:=0.30 \
-  arena_surface_z_m:=0.0
+  arena_depth_m:=11.0
 ```
 
 ## YOLO 설정 주의사항

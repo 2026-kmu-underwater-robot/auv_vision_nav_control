@@ -30,11 +30,8 @@ def generate_launch_description():
         DeclareLaunchArgument("arena_length_m", default_value="10.0"),
         DeclareLaunchArgument("arena_width_m", default_value="15.0"),
         DeclareLaunchArgument("arena_depth_m", default_value="11.0"),
-        DeclareLaunchArgument("arena_offset_x_m", default_value="0.0"),
-        DeclareLaunchArgument("arena_offset_y_m", default_value="0.0"),
-        DeclareLaunchArgument("arena_surface_z_m", default_value="0.0"),
         DeclareLaunchArgument("arena_start_corner", default_value="bottom_left"),
-        DeclareLaunchArgument("arena_frame", default_value="odom"),
+        DeclareLaunchArgument("arena_frame", default_value="arena"),
     ]
 
     visualization = Node(
@@ -48,9 +45,6 @@ def generate_launch_description():
                 "arena_length_m": typed("arena_length_m", float),
                 "arena_width_m": typed("arena_width_m", float),
                 "arena_depth_m": typed("arena_depth_m", float),
-                "arena_offset_x_m": typed("arena_offset_x_m", float),
-                "arena_offset_y_m": typed("arena_offset_y_m", float),
-                "arena_surface_z_m": typed("arena_surface_z_m", float),
                 "arena_start_corner": LaunchConfiguration("arena_start_corner"),
                 "arena_frame": LaunchConfiguration("arena_frame"),
             },

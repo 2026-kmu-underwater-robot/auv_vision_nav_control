@@ -16,6 +16,8 @@
 
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <mavros_msgs/msg/position_target.hpp>
 #include <mavros_msgs/msg/state.hpp>
 #include <mavros_msgs/srv/set_mode.hpp>
@@ -24,6 +26,7 @@
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <tf2_ros/transform_broadcaster.h>
 
 #include "kmu26_auv_planning_vision_control/msg/buoy_detection2_d.hpp"
 #include "kmu26_auv_planning_vision_control/msg/buoy_track.hpp"
@@ -49,6 +52,29 @@ double horizontal_distance(const Point & a, const Point & b)
   return std::hypot(a.x - b.x, a.y - b.y);
 }
 
+std::optional<double> yaw_from_quaternion(
+  const geometry_msgs::msg::Quaternion & orientation)
+{
+  const double norm_squared =
+    orientation.x * orientation.x + orientation.y * orientation.y +
+    orientation.z * orientation.z + orientation.w * orientation.w;
+  if (
+    !std::isfinite(norm_squared) || norm_squared < 1.0e-12 ||
+    !std::isfinite(orientation.x) || !std::isfinite(orientation.y) ||
+    !std::isfinite(orientation.z) || !std::isfinite(orientation.w))
+  {
+    return std::nullopt;
+  }
+  const double inverse_norm = 1.0 / std::sqrt(norm_squared);
+  const double x = orientation.x * inverse_norm;
+  const double y = orientation.y * inverse_norm;
+  const double z = orientation.z * inverse_norm;
+  const double w = orientation.w * inverse_norm;
+  return std::atan2(
+    2.0 * (w * z + x * y),
+    1.0 - 2.0 * (y * y + z * z));
+}
+
 }  // namespace
 
 class BuoyMissionManager : public rclcpp::Node
@@ -66,6 +92,9 @@ public:
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       odom_topic_, rclcpp::SensorDataQoS(),
       std::bind(&BuoyMissionManager::on_odom, this, std::placeholders::_1));
+    arena_start_frame_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+      arena_start_frame_topic_, rclcpp::QoS(1).reliable().transient_local(),
+      std::bind(&BuoyMissionManager::on_arena_start_frame, this, std::placeholders::_1));
     detection_2d_sub_ = create_subscription<Detection2D>(
       detection_2d_topic_, 20,
       std::bind(&BuoyMissionManager::on_detection_2d, this, std::placeholders::_1));
@@ -107,6 +136,7 @@ public:
       waypoint_debug_topic_, 10);
     waypoint_pub_ = create_publisher<mavros_msgs::msg::PositionTarget>(
       waypoint_topic_, 10);
+    arena_tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     set_mode_client_ = create_client<mavros_msgs::srv::SetMode>(set_mode_service_);
     timer_ = create_wall_timer(
       std::chrono::milliseconds(100), std::bind(&BuoyMissionManager::on_timer, this));
@@ -115,12 +145,12 @@ public:
     publish_state();
     RCLCPP_INFO(
       get_logger(),
-      "Mission manager ready: arena x=[%.2f, %.2f] y=[%.2f, %.2f] "
-      "z=[%.2f, %.2f], dry_run=%s, waiting for start flag on %s",
-      arena_offset_x_, arena_offset_x_ + search_length_,
-      arena_y_min(), arena_y_max(),
-      arena_surface_z_ - search_max_depth_, arena_surface_z_,
+      "Mission manager ready: arena-local x=[0.00, %.2f] width=%.2f "
+      "z=[%.2f, 0.00], frame=%s, dry_run=%s; waiting for %s and start flag on %s",
+      search_length_, search_width_, -search_max_depth_,
+      arena_frame_.c_str(),
       dry_run_ ? "true" : "false",
+      arena_start_frame_topic_.c_str(),
       mission_start_topic_.c_str());
     if (dry_run_) {
       RCLCPP_WARN(
@@ -163,6 +193,9 @@ private:
   void declare_topics()
   {
     odom_topic_ = declare_parameter<std::string>("odom_topic", "/odometry/filtered");
+    arena_start_frame_topic_ = declare_parameter<std::string>(
+      "arena_start_frame_topic", "/guided/start_frame");
+    arena_frame_ = declare_parameter<std::string>("arena_frame", "arena");
     detection_2d_topic_ = declare_parameter<std::string>(
       "detection_2d_topic", "/vision/buoy_detection_2d");
     mission_start_topic_ = declare_parameter<std::string>(
@@ -200,9 +233,6 @@ private:
     search_length_ = declare_parameter<double>("arena_length_m", 10.0);
     search_width_ = declare_parameter<double>("arena_width_m", 15.0);
     search_max_depth_ = declare_parameter<double>("arena_depth_m", 11.0);
-    arena_offset_x_ = declare_parameter<double>("arena_offset_x_m", 0.0);
-    arena_offset_y_ = declare_parameter<double>("arena_offset_y_m", 0.0);
-    arena_surface_z_ = declare_parameter<double>("arena_surface_z_m", 0.0);
     arena_start_corner_ = declare_parameter<std::string>(
       "arena_start_corner", "bottom_left");
     horizontal_margin_ = declare_parameter<double>("arena_safety_margin_m", 0.5);
@@ -253,11 +283,8 @@ private:
     if (search_length_ <= 0.0 || search_width_ <= 0.0 || search_max_depth_ <= 0.0) {
       throw std::invalid_argument("search volume dimensions must be positive");
     }
-    if (
-      !std::isfinite(arena_offset_x_) || !std::isfinite(arena_offset_y_) ||
-      !std::isfinite(arena_surface_z_))
-    {
-      throw std::invalid_argument("arena offsets must be finite");
+    if (arena_start_frame_topic_.empty() || arena_frame_.empty()) {
+      throw std::invalid_argument("arena frame names must not be empty");
     }
     if (
       arena_start_corner_ != "bottom_left" &&
@@ -293,9 +320,60 @@ private:
     if (message->header.frame_id.empty()) {
       return;
     }
+    if (
+      arena_frame_ready_ &&
+      message->header.frame_id != arena_parent_frame_)
+    {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Ignored odometry in '%s'; arena start frame uses '%s'",
+        message->header.frame_id.c_str(), arena_parent_frame_.c_str());
+      return;
+    }
     odom_frame_ = message->header.frame_id;
     latest_odom_ = *message;
     last_odom_received_ = now();
+  }
+
+  void on_arena_start_frame(
+    const geometry_msgs::msg::PoseStamped::SharedPtr message)
+  {
+    if (message->header.frame_id.empty()) {
+      RCLCPP_WARN(get_logger(), "Ignored /guided/start_frame with an empty parent frame");
+      return;
+    }
+    if (state_ != MissionState::IDLE && arena_frame_ready_) {
+      RCLCPP_WARN(
+        get_logger(), "Ignored arena start-frame update while a mission is active");
+      return;
+    }
+    const auto yaw = yaw_from_quaternion(message->pose.orientation);
+    const auto & origin = message->pose.position;
+    if (
+      !yaw || !std::isfinite(origin.x) || !std::isfinite(origin.y) ||
+      !std::isfinite(origin.z))
+    {
+      RCLCPP_WARN(get_logger(), "Ignored invalid /guided/start_frame pose");
+      return;
+    }
+    if (!odom_frame_.empty() && message->header.frame_id != odom_frame_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Ignored /guided/start_frame in '%s'; odometry uses '%s'",
+        message->header.frame_id.c_str(), odom_frame_.c_str());
+      return;
+    }
+    arena_parent_frame_ = message->header.frame_id;
+    arena_origin_ = origin;
+    arena_yaw_rad_ = *yaw;
+    arena_frame_ready_ = true;
+    publish_arena_tf();
+    RCLCPP_INFO(
+      get_logger(),
+      "Arena frame captured from %s: origin=(%.3f, %.3f, %.3f), yaw=%.2f deg",
+      arena_start_frame_topic_.c_str(),
+      arena_origin_.x, arena_origin_.y, arena_origin_.z,
+      arena_yaw_rad_ * 180.0 / 3.14159265358979323846);
   }
 
   void on_mission_start(const std_msgs::msg::Bool::SharedPtr message)
@@ -349,16 +427,23 @@ private:
     if (message->header.frame_id.empty()) {
       return;
     }
+    if (
+      !odom_frame_.empty() && message->header.frame_id != odom_frame_ &&
+      message->header.frame_id != arena_parent_frame_)
+    {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Ignored buoy tracks in '%s'; expected odom frame '%s'",
+        message->header.frame_id.c_str(), odom_frame_.c_str());
+      return;
+    }
     for (const auto & input : message->tracks) {
       Point position = input.position_mission;
-      if (origin_initialized_ && message->header.frame_id != "mission") {
-        position = odom_to_mission(position);
-        if (!inside_mission_volume(position, 0.0)) {
-          RCLCPP_WARN_THROTTLE(
-            get_logger(), *get_clock(), 2000,
-            "Ignored buoy track outside configured arena: id=%u", input.id);
-          continue;
-        }
+      if (arena_frame_ready_ && !inside_arena(position, 0.0)) {
+        RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 2000,
+          "Ignored odom buoy track outside configured arena: id=%u", input.id);
+        continue;
       }
       auto * track = find_track(input.id);
       if (!track) {
@@ -418,7 +503,7 @@ private:
     }
     acoustic_control_granted_ = true;
     acoustic_direct_strike_active_ = true;
-    active_command_mission_.reset();
+    active_command_odom_.reset();
     visual_servo_started_ = now();
     publish_vision_enable(true);
     transition_to(
@@ -435,6 +520,13 @@ private:
       RCLCPP_WARN(get_logger(), "Mission start rejected: fresh /odometry/filtered is required");
       return;
     }
+    if (!arena_frame_ready_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Mission start rejected: waiting for a valid %s",
+        arena_start_frame_topic_.c_str());
+      return;
+    }
     if (
       !dry_run_ && require_fcu_armed_ &&
       (!fcu_state_ || !fcu_state_->connected || !fcu_state_->armed))
@@ -443,19 +535,13 @@ private:
         get_logger(), "Mission start rejected: connected and armed FCU is required");
       return;
     }
-    // Mapping is always active. Convert pre-start odom tracks into the fixed
-    // arena-local box whose origin is configured by arena_offset_x/y.
-    for (auto & track : tracks_) {
-      track.position = odom_to_mission(track.position);
-    }
     tracks_.erase(
       std::remove_if(
         tracks_.begin(), tracks_.end(),
         [this](const BuoyTrack & track) {
-          return !inside_mission_volume(track.position, 0.0);
+          return !inside_arena(track.position, 0.0);
         }),
       tracks_.end());
-    origin_initialized_ = true;
     active_target_id_.reset();
     last_target_bbox_center_.reset();
     publish_vision_enable(false);
@@ -470,16 +556,16 @@ private:
     if (!acoustic_control_granted_) {
       target_confirmation_sent_ = false;
     }
-    active_command_mission_.reset();
+    active_command_odom_.reset();
     active_target_id_.reset();
     tracks_.clear();
     last_target_bbox_center_.reset();
-    origin_initialized_ = false;
     transition_to(MissionState::IDLE, reason);
   }
 
   void on_timer()
   {
+    publish_arena_tf();
     if (state_ == MissionState::IDLE || state_ == MissionState::COMPLETE) {
       return;
     }
@@ -502,8 +588,8 @@ private:
       return;
     }
     if (state_ != MissionState::FAILSAFE) {
-      const auto robot = current_mission_position();
-      if (robot && !inside_mission_volume(*robot, 0.25)) {
+      const auto robot = current_odom_position();
+      if (robot && !inside_arena(*robot, 0.25)) {
         fail("robot pose left the configured mission volume");
         return;
       }
@@ -531,7 +617,7 @@ private:
 
   void run_wait_for_target()
   {
-    const auto robot = current_mission_position();
+    const auto robot = current_odom_position();
     if (!robot) {
       return;
     }
@@ -555,7 +641,7 @@ private:
   void begin_target(uint32_t id, const std::string & reason)
   {
     auto * track = find_track(id);
-    const auto robot = current_mission_position();
+    const auto robot = current_odom_position();
     if (!track || !robot) {
       return;
     }
@@ -564,11 +650,11 @@ private:
     last_target_bbox_center_ = track->last_image_center;
     target_started_ = now();
     track->status = TrackMessage::ASSIGNED;
-    active_command_mission_ = make_standoff(*robot, track->position);
-    if (!active_command_mission_ || !inside_safe_vehicle_volume(*active_command_mission_)) {
+    active_command_odom_ = make_standoff(*robot, track->position);
+    if (!active_command_odom_ || !inside_safe_arena(*active_command_odom_)) {
       track->status = TrackMessage::LOST;
       active_target_id_.reset();
-      active_command_mission_.reset();
+      active_command_odom_.reset();
       RCLCPP_WARN(get_logger(), "Buoy id=%u has no safe in-volume standoff waypoint", id);
       return;
     }
@@ -586,24 +672,32 @@ private:
     } else {
       output.x -= standoff_distance_;
     }
-    output.x = std::clamp(output.x, horizontal_margin_, search_length_ - horizontal_margin_);
-    output.y = std::clamp(output.y, horizontal_margin_, search_width_ - horizontal_margin_);
-    output.z = std::clamp(
-      buoy.z, -(search_max_depth_ - bottom_margin_), -surface_margin_);
-    return output;
+    Point arena = odom_to_arena(output);
+    arena.x = std::clamp(
+      arena.x, horizontal_margin_, search_length_ - horizontal_margin_);
+    if (arena_start_corner_ == "bottom_left") {
+      arena.y = std::clamp(
+        arena.y, -search_width_ + horizontal_margin_, -horizontal_margin_);
+    } else {
+      arena.y = std::clamp(
+        arena.y, horizontal_margin_, search_width_ - horizontal_margin_);
+    }
+    arena.z = std::clamp(
+      arena.z, -(search_max_depth_ - bottom_margin_), -surface_margin_);
+    return arena_to_odom(arena);
   }
 
   void run_guided_approach()
   {
     auto * track = active_target();
-    const auto robot = current_mission_position();
-    if (!track || !robot || !active_command_mission_) {
+    const auto robot = current_odom_position();
+    if (!track || !robot || !active_command_odom_) {
       recover_after_target("active target or approach waypoint disappeared");
       return;
     }
     track->status = TrackMessage::APPROACHING;
     const bool waypoint_reached =
-      point_distance(*robot, *active_command_mission_) <= waypoint_tolerance_;
+      point_distance(*robot, *active_command_odom_) <= waypoint_tolerance_;
     const bool close_enough =
       point_distance(*robot, track->position) <= standoff_distance_ + waypoint_tolerance_;
     if (!waypoint_reached && !close_enough) {
@@ -639,7 +733,7 @@ private:
       return;
     }
     if ((now() - handoff_started_).seconds() >= handoff_hold_sec_) {
-      active_command_mission_.reset();
+      active_command_odom_.reset();
       publish_vision_enable(true);
       visual_servo_started_ = now();
       transition_to(MissionState::VISUAL_SERVO, "vehicle settled and selected target remained visible");
@@ -695,7 +789,7 @@ private:
       RCLCPP_INFO(get_logger(), "Buoy id=%u marked SERVICED", track->id);
     }
     active_target_id_.reset();
-    active_command_mission_.reset();
+    active_command_odom_.reset();
     transition_to(MissionState::COMPLETE, "flag-started buoy strike completed");
   }
 
@@ -723,7 +817,7 @@ private:
       track->status = TrackMessage::LOST;
     }
     active_target_id_.reset();
-    active_command_mission_.reset();
+    active_command_odom_.reset();
     transition_to(MissionState::WAIT_FOR_TARGET, reason);
   }
 
@@ -776,14 +870,13 @@ private:
 
   void publish_active_waypoint()
   {
-    if (!active_command_mission_ || !origin_initialized_) {
+    if (!active_command_odom_ || !arena_frame_ready_) {
       return;
     }
-    const Point odom_point = mission_to_odom(*active_command_mission_);
     geometry_msgs::msg::PointStamped debug;
     debug.header.stamp = now();
     debug.header.frame_id = odom_frame_;
-    debug.point = odom_point;
+    debug.point = *active_command_odom_;
     waypoint_debug_pub_->publish(debug);
 
     if (!latest_odom_) {
@@ -806,9 +899,7 @@ private:
       mavros_msgs::msg::PositionTarget::IGNORE_YAW_RATE;
     // Keep mapping and control in the same odom-fixed ROS ENU frame. Only the
     // absolute position is commanded; yaw and yaw rate are left uncontrolled.
-    command.position.x = odom_point.x;
-    command.position.y = odom_point.y;
-    command.position.z = odom_point.z;
+    command.position = *active_command_odom_;
     if ((acoustic_handoff_enabled_ && !acoustic_control_granted_) || dry_run_) {
       return;
     }
@@ -970,7 +1061,7 @@ private:
   void fail(const std::string & reason)
   {
     publish_vision_enable(false);
-    active_command_mission_.reset();
+    active_command_odom_.reset();
     transition_to(MissionState::FAILSAFE, reason);
   }
 
@@ -993,12 +1084,12 @@ private:
     return !latest_odom_ || (now() - last_odom_received_).seconds() > odom_timeout_sec_;
   }
 
-  std::optional<Point> current_mission_position() const
+  std::optional<Point> current_odom_position() const
   {
-    if (!latest_odom_ || !origin_initialized_) {
+    if (!latest_odom_ || !arena_frame_ready_) {
       return std::nullopt;
     }
-    return odom_to_mission(latest_odom_->pose.pose.position);
+    return latest_odom_->pose.pose.position;
   }
 
   double current_speed() const
@@ -1010,52 +1101,79 @@ private:
     return std::hypot(std::hypot(velocity.x, velocity.y), velocity.z);
   }
 
-  Point odom_to_mission(const Point & odom) const
+  Point odom_to_arena(const Point & odom) const
   {
-    const double y_sign = arena_start_corner_ == "bottom_left" ? -1.0 : 1.0;
+    const double cosine = std::cos(arena_yaw_rad_);
+    const double sine = std::sin(arena_yaw_rad_);
+    const double dx = odom.x - arena_origin_.x;
+    const double dy = odom.y - arena_origin_.y;
     Point output;
-    output.x = odom.x - arena_offset_x_;
-    output.y = y_sign * (odom.y - arena_offset_y_);
-    output.z = odom.z - arena_surface_z_;
+    output.x = cosine * dx + sine * dy;
+    output.y = -sine * dx + cosine * dy;
+    output.z = odom.z - arena_origin_.z;
     return output;
   }
 
-  Point mission_to_odom(const Point & mission) const
+  Point arena_to_odom(const Point & arena) const
   {
-    const double y_sign = arena_start_corner_ == "bottom_left" ? -1.0 : 1.0;
+    const double cosine = std::cos(arena_yaw_rad_);
+    const double sine = std::sin(arena_yaw_rad_);
     Point output;
-    output.x = arena_offset_x_ + mission.x;
-    output.y = arena_offset_y_ + y_sign * mission.y;
-    output.z = arena_surface_z_ + mission.z;
+    output.x = arena_origin_.x + cosine * arena.x - sine * arena.y;
+    output.y = arena_origin_.y + sine * arena.x + cosine * arena.y;
+    output.z = arena_origin_.z + arena.z;
     return output;
   }
 
-  double arena_y_min() const
+  bool inside_arena(const Point & odom, double tolerance) const
   {
-    return arena_start_corner_ == "bottom_left" ?
-      arena_offset_y_ - search_width_ : arena_offset_y_;
-  }
-
-  double arena_y_max() const
-  {
-    return arena_start_corner_ == "bottom_left" ?
-      arena_offset_y_ : arena_offset_y_ + search_width_;
-  }
-
-  bool inside_mission_volume(const Point & point, double tolerance) const
-  {
+    if (!arena_frame_ready_) {
+      return false;
+    }
+    const Point arena = odom_to_arena(odom);
+    const double y_min =
+      arena_start_corner_ == "bottom_left" ? -search_width_ : 0.0;
+    const double y_max =
+      arena_start_corner_ == "bottom_left" ? 0.0 : search_width_;
     return
-      point.x >= -tolerance && point.x <= search_length_ + tolerance &&
-      point.y >= -tolerance && point.y <= search_width_ + tolerance &&
-      point.z >= -search_max_depth_ - tolerance && point.z <= tolerance;
+      arena.x >= -tolerance && arena.x <= search_length_ + tolerance &&
+      arena.y >= y_min - tolerance && arena.y <= y_max + tolerance &&
+      arena.z >= -search_max_depth_ - tolerance && arena.z <= tolerance;
   }
 
-  bool inside_safe_vehicle_volume(const Point & point) const
+  bool inside_safe_arena(const Point & odom) const
   {
+    if (!arena_frame_ready_) {
+      return false;
+    }
+    const Point arena = odom_to_arena(odom);
+    const double y_min = arena_start_corner_ == "bottom_left" ?
+      -search_width_ + horizontal_margin_ : horizontal_margin_;
+    const double y_max = arena_start_corner_ == "bottom_left" ?
+      -horizontal_margin_ : search_width_ - horizontal_margin_;
     return
-      point.x >= horizontal_margin_ && point.x <= search_length_ - horizontal_margin_ &&
-      point.y >= horizontal_margin_ && point.y <= search_width_ - horizontal_margin_ &&
-      point.z >= -(search_max_depth_ - bottom_margin_) && point.z <= -surface_margin_;
+      arena.x >= horizontal_margin_ &&
+      arena.x <= search_length_ - horizontal_margin_ &&
+      arena.y >= y_min && arena.y <= y_max &&
+      arena.z >= -(search_max_depth_ - bottom_margin_) &&
+      arena.z <= -surface_margin_;
+  }
+
+  void publish_arena_tf()
+  {
+    if (!arena_frame_ready_ || !arena_tf_broadcaster_) {
+      return;
+    }
+    geometry_msgs::msg::TransformStamped transform;
+    transform.header.stamp = now();
+    transform.header.frame_id = arena_parent_frame_;
+    transform.child_frame_id = arena_frame_;
+    transform.transform.translation.x = arena_origin_.x;
+    transform.transform.translation.y = arena_origin_.y;
+    transform.transform.translation.z = arena_origin_.z;
+    transform.transform.rotation.z = std::sin(0.5 * arena_yaw_rad_);
+    transform.transform.rotation.w = std::cos(0.5 * arena_yaw_rad_);
+    arena_tf_broadcaster_->sendTransform(transform);
   }
 
   BuoyTrack * find_track(uint32_t id)
@@ -1085,7 +1203,8 @@ private:
   }
 
   // Parameters and topic names.
-  std::string odom_topic_, detection_2d_topic_, mission_start_topic_;
+  std::string odom_topic_, arena_start_frame_topic_, arena_frame_;
+  std::string detection_2d_topic_, mission_start_topic_;
   std::string target_complete_topic_, target_failed_topic_;
   std::string mission_state_topic_, buoy_tracks_topic_;
   std::string selected_bbox_topic_, vision_enable_topic_;
@@ -1095,9 +1214,10 @@ private:
   std::string vision_search_topic_, target_confirmed_topic_, control_granted_topic_;
   std::string vision_mode_name_;
   std::string arena_start_corner_;
-  std::string odom_frame_;
+  std::string odom_frame_, arena_parent_frame_;
   double search_length_, search_width_, search_max_depth_;
-  double arena_offset_x_{0.0}, arena_offset_y_{0.0}, arena_surface_z_{0.0};
+  Point arena_origin_;
+  double arena_yaw_rad_{0.0};
   double horizontal_margin_, surface_margin_, bottom_margin_;
   double waypoint_tolerance_;
   double standoff_distance_, target_recent_sec_;
@@ -1111,14 +1231,14 @@ private:
   bool acoustic_handoff_enabled_{true};
 
   MissionState state_{MissionState::IDLE};
-  bool origin_initialized_{false};
+  bool arena_frame_ready_{false};
   bool mode_request_pending_{false};
   bool vision_search_active_{false};
   bool perception_target_confirmed_{false};
   bool target_confirmation_sent_{false};
   bool acoustic_control_granted_{false};
   bool acoustic_direct_strike_active_{false};
-  std::optional<Point> active_command_mission_;
+  std::optional<Point> active_command_odom_;
   std::vector<BuoyTrack> tracks_;
   std::optional<uint32_t> active_target_id_;
   std::optional<std::pair<double, double>> last_target_bbox_center_;
@@ -1135,6 +1255,7 @@ private:
   rclcpp::Time last_mode_request_{0, 0, RCL_ROS_TIME};
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr arena_start_frame_sub_;
   rclcpp::Subscription<Detection2D>::SharedPtr detection_2d_sub_;
   rclcpp::Subscription<TrackArray>::SharedPtr tracks_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_sub_;
@@ -1150,6 +1271,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr vision_enable_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr waypoint_debug_pub_;
   rclcpp::Publisher<mavros_msgs::msg::PositionTarget>::SharedPtr waypoint_pub_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> arena_tf_broadcaster_;
   rclcpp::Client<mavros_msgs::srv::SetMode>::SharedPtr set_mode_client_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
