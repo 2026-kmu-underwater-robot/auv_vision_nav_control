@@ -170,7 +170,7 @@ YOLO 부표 바운딩 박스
 비전 데이터 처리는 다음 런치로 실행합니다.
 
 ```bash
-ros2 launch kmu26_auv_planning_vision_control laptop_yolo_detection.launch.py \
+ros2 launch auv_vision_nav_control laptop_yolo_detection.launch.py \
   model_path:=/path/to/model.pt \
   arena_start_corner:=bottom_left \
   arena_length_m:=5.49 \
@@ -198,7 +198,7 @@ rotation    = (roll=0, pitch=0, yaw=0)
 나중에 카메라 장착 위치를 측정하면 다음 인자로 수정할 수 있습니다.
 
 ```bash
-ros2 launch kmu26_auv_planning_vision_control \
+ros2 launch auv_vision_nav_control \
   laptop_yolo_detection.launch.py \
   model_path:=/path/to/model.pt \
   camera_mount_parent_frame:=fcu_link \
@@ -224,7 +224,7 @@ ros2 run tf2_ros tf2_echo base_link camera_color_optical_frame
 ```
 
 ```bash
-ros2 launch kmu26_auv_planning_vision_control buoy_mission.launch.py \
+ros2 launch auv_vision_nav_control buoy_mission.launch.py \
   arena_start_corner:=bottom_left \
   arena_length_m:=5.49 \
   arena_width_m:=2.74
@@ -333,7 +333,7 @@ ROS의 `odom` 좌표 방향은 다음과 같습니다.
 cd /home/pc/Downloads/auv_buoy_ws
 
 colcon --log-base log_yolo_range_ver1 build \
-  --base-paths src/yolㅐ_range_ver1/kmu26_auv_planning_vision_control \
+  --base-paths src/yolㅐ_range_ver1/auv_vision_nav_control \
   --build-base build_yolo_range_ver1 \
   --install-base install_yolo_range_ver1
 
@@ -377,7 +377,7 @@ ros2 run tf2_ros tf2_echo base_link camera_color_optical_frame
 ```bash
 source /home/pc/Downloads/auv_buoy_ws/install_yolo_range_ver1/setup.bash
 
-ros2 launch kmu26_auv_planning_vision_control \
+ros2 launch auv_vision_nav_control \
   laptop_yolo_detection.launch.py \
   model_path:=/home/pc/Downloads/best.pt \
   device:=auto \
@@ -390,7 +390,7 @@ ros2 launch kmu26_auv_planning_vision_control \
 ```bash
 source /home/pc/Downloads/auv_buoy_ws/install_yolo_range_ver1/setup.bash
 
-ros2 launch kmu26_auv_planning_vision_control buoy_mission.launch.py
+ros2 launch auv_vision_nav_control buoy_mission.launch.py
 ```
 
 세 번째 터미널은 선택 사항입니다. RViz가 설치된 모니터링 노트북에서만
@@ -399,7 +399,7 @@ ros2 launch kmu26_auv_planning_vision_control buoy_mission.launch.py
 ```bash
 source /노트북의/워크스페이스/install_yolo_range_ver1/setup.bash
 
-ros2 launch kmu26_auv_planning_vision_control \
+ros2 launch auv_vision_nav_control \
   buoy_mission_visualization.launch.py
 ```
 
@@ -427,7 +427,7 @@ Python 런치 파일 문법 검사와 `colcon build`도 통과했습니다. 자�
 RC Override를 실제로 보내지 않습니다.
 
 ```bash
-ros2 launch kmu26_auv_planning_vision_control buoy_mission.launch.py \
+ros2 launch auv_vision_nav_control buoy_mission.launch.py \
   dry_run:=true \
   visual_dry_run:=true \
   request_vision_mode:=false
@@ -436,7 +436,7 @@ ros2 launch kmu26_auv_planning_vision_control buoy_mission.launch.py \
 음향 인계 없이 패키지만 시험할 때는 인계를 끄고 임무 시작 신호를 보냅니다.
 
 ```bash
-ros2 launch kmu26_auv_planning_vision_control buoy_mission.launch.py \
+ros2 launch auv_vision_nav_control buoy_mission.launch.py \
   acoustic_handoff_enabled:=false \
   dry_run:=true \
   visual_dry_run:=true
@@ -483,7 +483,7 @@ Jetson에서는 RViz를 제외하고 비전 런치와 임무 런치를 각각 �
 ```bash
 source /home/pc/Downloads/auv_buoy_ws/install_yolo_range_ver1/setup.bash
 
-ros2 launch kmu26_auv_planning_vision_control \
+ros2 launch auv_vision_nav_control \
   laptop_yolo_detection.launch.py \
   model_path:=/home/pc/Downloads/best.pt \
   device:=auto \
@@ -495,7 +495,7 @@ ros2 launch kmu26_auv_planning_vision_control \
 
 ```bash
 source /home/pc/Downloads/auv_buoy_ws/install_yolo_range_ver1/setup.bash
-ros2 launch kmu26_auv_planning_vision_control buoy_mission.launch.py
+ros2 launch auv_vision_nav_control buoy_mission.launch.py
 ```
 
 위 명령은 실제 이동과 실제 타격이 켜진 기본 설정을 사용합니다. 노드를
@@ -526,7 +526,7 @@ Jetson에서 만든 실행 파일은 ARM용이므로 같은 소스 패키지를 
 ```bash
 source /노트북의/워크스페이스/install_yolo_range_ver1/setup.bash
 
-ros2 launch kmu26_auv_planning_vision_control \
+ros2 launch auv_vision_nav_control \
   buoy_mission_visualization.launch.py
 ```
 
@@ -562,7 +562,7 @@ RViz의 기준 좌표는 `arena`입니다. 부표, 로봇 경로와 웨이포인
 임무 탐색 범위를 변경했다면 시각화에도 같은 값을 전달해야 합니다.
 
 ```bash
-ros2 launch kmu26_auv_planning_vision_control \
+ros2 launch auv_vision_nav_control \
   buoy_mission_visualization.launch.py \
   arena_start_corner:=bottom_left \
   arena_length_m:=5.49 \

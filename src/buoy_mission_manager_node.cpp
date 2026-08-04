@@ -28,11 +28,11 @@
 #include <std_msgs/msg/string.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
-#include "kmu26_auv_planning_vision_control/msg/buoy_detection2_d.hpp"
-#include "kmu26_auv_planning_vision_control/msg/buoy_track.hpp"
-#include "kmu26_auv_planning_vision_control/msg/buoy_track_array.hpp"
+#include "auv_vision_nav_control/msg/buoy_detection2_d.hpp"
+#include "auv_vision_nav_control/msg/buoy_track.hpp"
+#include "auv_vision_nav_control/msg/buoy_track_array.hpp"
 
-namespace kmu26_auv_planning_vision_control
+namespace auv_vision_nav_control
 {
 
 using Detection2D = msg::BuoyDetection2D;
@@ -1276,13 +1276,13 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
-}  // namespace kmu26_auv_planning_vision_control
+}  // namespace auv_vision_nav_control
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   rclcpp::spin(
-    std::make_shared<kmu26_auv_planning_vision_control::BuoyMissionManager>());
+    std::make_shared<auv_vision_nav_control::BuoyMissionManager>());
   rclcpp::shutdown();
   return 0;
 }

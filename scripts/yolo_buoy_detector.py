@@ -9,7 +9,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from kmu26_auv_planning_vision_control.msg import BuoyDetection2D
+from auv_vision_nav_control.msg import BuoyDetection2D
 from sensor_msgs.msg import CompressedImage
 
 

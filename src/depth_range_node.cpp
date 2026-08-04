@@ -13,10 +13,10 @@
 #include <sensor_msgs/image_encodings.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
-#include "kmu26_auv_planning_vision_control/msg/buoy_detection2_d.hpp"
-#include "kmu26_auv_planning_vision_control/msg/buoy_detection3_d.hpp"
+#include "auv_vision_nav_control/msg/buoy_detection2_d.hpp"
+#include "auv_vision_nav_control/msg/buoy_detection3_d.hpp"
 
-namespace kmu26_auv_planning_vision_control
+namespace auv_vision_nav_control
 {
 using Image = sensor_msgs::msg::Image;
 using CameraInfo = sensor_msgs::msg::CameraInfo;
@@ -279,12 +279,12 @@ private:
   int min_valid_pixels_;
   int sample_stride_;
 };
-}  // namespace kmu26_auv_planning_vision_control
+}  // namespace auv_vision_nav_control
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<kmu26_auv_planning_vision_control::DepthRangeNode>());
+  rclcpp::spin(std::make_shared<auv_vision_nav_control::DepthRangeNode>());
   rclcpp::shutdown();
   return 0;
 }

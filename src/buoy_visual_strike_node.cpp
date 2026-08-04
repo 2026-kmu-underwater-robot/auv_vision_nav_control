@@ -17,7 +17,7 @@
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/string.hpp>
 
-namespace kmu26_auv_planning_vision_control
+namespace auv_vision_nav_control
 {
 
 class BuoyVisualStrikeNode : public rclcpp::Node
@@ -745,13 +745,13 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
-}  // namespace kmu26_auv_planning_vision_control
+}  // namespace auv_vision_nav_control
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   auto node =
-    std::make_shared<kmu26_auv_planning_vision_control::BuoyVisualStrikeNode>();
+    std::make_shared<auv_vision_nav_control::BuoyVisualStrikeNode>();
   rclcpp::spin(node);
   node->publish_release_once();
   rclcpp::shutdown();

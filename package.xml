@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>kmu26_auv_planning_vision_control</name>
+  <name>auv_vision_nav_control</name>
   <version>0.1.0</version>
   <description>YOLO buoy detection node for AUV vision planning and control.</description>
   <maintainer email="user@example.com">AUV Team</maintainer>

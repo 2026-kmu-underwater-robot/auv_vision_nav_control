@@ -193,7 +193,7 @@ def generate_launch_description():
                 ],
             ),
             Node(
-                package="kmu26_auv_planning_vision_control",
+                package="auv_vision_nav_control",
                 executable="yolo_buoy_detector",
                 name="yolo_buoy_detector",
                 output="screen",
@@ -222,7 +222,7 @@ def generate_launch_description():
                 ],
             ),
             Node(
-                package="kmu26_auv_planning_vision_control",
+                package="auv_vision_nav_control",
                 executable="depth_range_node",
                 name="depth_range_node",
                 output="screen",
@@ -250,7 +250,7 @@ def generate_launch_description():
                 ],
             ),
             Node(
-                package="kmu26_auv_planning_vision_control",
+                package="auv_vision_nav_control",
                 executable="yolo_range_overlay_node",
                 name="yolo_range_overlay_node",
                 output="screen",
@@ -271,7 +271,7 @@ def generate_launch_description():
                 ],
             ),
             Node(
-                package="kmu26_auv_planning_vision_control",
+                package="auv_vision_nav_control",
                 executable="buoy_coordinate_mapper_node",
                 name="buoy_coordinate_mapper",
                 output="screen",

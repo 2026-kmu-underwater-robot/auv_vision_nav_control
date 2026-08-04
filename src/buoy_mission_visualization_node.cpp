@@ -18,10 +18,10 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
-#include "kmu26_auv_planning_vision_control/msg/buoy_track.hpp"
-#include "kmu26_auv_planning_vision_control/msg/buoy_track_array.hpp"
+#include "auv_vision_nav_control/msg/buoy_track.hpp"
+#include "auv_vision_nav_control/msg/buoy_track_array.hpp"
 
-namespace kmu26_auv_planning_vision_control
+namespace auv_vision_nav_control
 {
 
 using Marker = visualization_msgs::msg::Marker;
@@ -396,14 +396,14 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
-}  // namespace kmu26_auv_planning_vision_control
+}  // namespace auv_vision_nav_control
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   rclcpp::spin(
     std::make_shared<
-      kmu26_auv_planning_vision_control::BuoyMissionVisualization>());
+      auv_vision_nav_control::BuoyMissionVisualization>());
   rclcpp::shutdown();
   return 0;
 }

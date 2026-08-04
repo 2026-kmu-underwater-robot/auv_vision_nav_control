@@ -47,7 +47,7 @@ fi
 echo
 echo "Next:"
 echo "  mkdir -p ~/auv_ws/src"
-echo "  ln -sfn $(cd "${SCRIPT_DIR}/.." && pwd) ~/auv_ws/src/kmu26_auv_planning_vision_control"
-echo "  cd ~/auv_ws && colcon build --packages-select kmu26_auv_planning_vision_control --symlink-install"
+echo "  ln -sfn $(cd "${SCRIPT_DIR}/.." && pwd) ~/auv_ws/src/auv_vision_nav_control"
+echo "  cd ~/auv_ws && colcon build --packages-select auv_vision_nav_control --symlink-install"
 echo "  source ~/auv_ws/install/setup.bash"
-echo "  ros2 launch kmu26_auv_planning_vision_control laptop_yolo_detection.launch.py model_path:=/path/to/model.pt"
+echo "  ros2 launch auv_vision_nav_control laptop_yolo_detection.launch.py model_path:=/path/to/model.pt"

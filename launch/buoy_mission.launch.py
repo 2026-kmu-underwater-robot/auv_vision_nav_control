@@ -16,7 +16,7 @@ def generate_launch_description():
             "params_file",
             default_value=PathJoinSubstitution(
                 [
-                    FindPackageShare("kmu26_auv_planning_vision_control"),
+                    FindPackageShare("auv_vision_nav_control"),
                     "config",
                     "buoy_mission.yaml",
                 ]
@@ -77,7 +77,7 @@ def generate_launch_description():
         ),
     ]
     manager = Node(
-        package="kmu26_auv_planning_vision_control",
+        package="auv_vision_nav_control",
         executable="buoy_mission_manager_node",
         name="buoy_mission_manager",
         output="screen",
@@ -123,7 +123,7 @@ def generate_launch_description():
         ],
     )
     visual_strike = Node(
-        package="kmu26_auv_planning_vision_control",
+        package="auv_vision_nav_control",
         executable="buoy_visual_strike_node",
         name="buoy_visual_strike",
         output="screen",

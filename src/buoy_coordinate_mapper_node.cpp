@@ -24,11 +24,11 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
-#include "kmu26_auv_planning_vision_control/msg/buoy_detection3_d.hpp"
-#include "kmu26_auv_planning_vision_control/msg/buoy_track.hpp"
-#include "kmu26_auv_planning_vision_control/msg/buoy_track_array.hpp"
+#include "auv_vision_nav_control/msg/buoy_detection3_d.hpp"
+#include "auv_vision_nav_control/msg/buoy_track.hpp"
+#include "auv_vision_nav_control/msg/buoy_track_array.hpp"
 
-namespace kmu26_auv_planning_vision_control
+namespace auv_vision_nav_control
 {
 
 using Detection3D = msg::BuoyDetection3D;
@@ -669,14 +669,14 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr target_confirmed_pub_;
 };
 
-}  // namespace kmu26_auv_planning_vision_control
+}  // namespace auv_vision_nav_control
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   rclcpp::spin(
     std::make_shared<
-      kmu26_auv_planning_vision_control::BuoyCoordinateMapper>());
+      auv_vision_nav_control::BuoyCoordinateMapper>());
   rclcpp::shutdown();
   return 0;
 }

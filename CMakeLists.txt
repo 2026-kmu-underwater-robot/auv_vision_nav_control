@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(kmu26_auv_planning_vision_control)
+project(auv_vision_nav_control)
 
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)

@@ -15,9 +15,9 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 
-#include "kmu26_auv_planning_vision_control/msg/buoy_detection3_d.hpp"
+#include "auv_vision_nav_control/msg/buoy_detection3_d.hpp"
 
-namespace kmu26_auv_planning_vision_control
+namespace auv_vision_nav_control
 {
 using CompressedImage = sensor_msgs::msg::CompressedImage;
 using Detection3D = msg::BuoyDetection3D;
@@ -138,12 +138,12 @@ private:
   std::map<uint64_t, std::vector<Detection3D>> pending_;
   std::string output_topic_, window_name_; double max_sync_sec_; int jpeg_quality_; bool show_window_;
 };
-}  // namespace kmu26_auv_planning_vision_control
+}  // namespace auv_vision_nav_control
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<kmu26_auv_planning_vision_control::YoloRangeOverlayNode>());
+  rclcpp::spin(std::make_shared<auv_vision_nav_control::YoloRangeOverlayNode>());
   rclcpp::shutdown();
   return 0;
 }

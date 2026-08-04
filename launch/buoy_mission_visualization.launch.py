@@ -12,7 +12,7 @@ def typed(name: str, value_type):
 
 
 def generate_launch_description():
-    package_share = FindPackageShare("kmu26_auv_planning_vision_control")
+    package_share = FindPackageShare("auv_vision_nav_control")
     arguments = [
         DeclareLaunchArgument(
             "params_file",
@@ -35,7 +35,7 @@ def generate_launch_description():
     ]
 
     visualization = Node(
-        package="kmu26_auv_planning_vision_control",
+        package="auv_vision_nav_control",
         executable="buoy_mission_visualization_node",
         name="buoy_mission_visualization",
         output="screen",
